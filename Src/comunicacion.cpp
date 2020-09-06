@@ -47,18 +47,35 @@ EthernetClient client;
 // Objeto servidor
 EthernetServer server(PUERTO);
 
-int8_t byteCount = -1;
-
 static uint8_t buffer[1024];
 
+// Indica que recibio el inicializador de msj
 bool isMsjInicializado;
+
+// Indica que debe responder/Indica que esta esperando respuesta
+bool mustResponder;
+
+int8_t byteCount = -1;
 
 // ############################################################################
 // CABECERA DE FUNCIONES INTERNAS
 bool recibir_conexion();
+bool debeResponder(void);
+bool noDebeResponder(void);
+// ############################################################################
+// CABECERA DE FUNCIONES INTERNAS
+bool debeResponder() {
+	mustResponder = true;
+	return mustResponder;
+}
+
+bool noDebeResponder() {
+	mustResponder = false;
+	return mustResponder;
+}
 
 // ############################################################################
-// FUNCIONES EXTERNAS
+// FUNCIONES PUBLICAS
 
 // ---------- Cliente -------------
 
@@ -213,8 +230,9 @@ char leer_mensaje() {
 	return caracter_leido;
 }*/
 
+// Maquina de estados del servidor para comunicacion
 void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
-	int i;
+	static int idx_buffer;
 	char c;
 	uint8_t msj;
 	switch(estado) {
@@ -225,7 +243,7 @@ void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 	case 1:	// Espera conexion de cliente
 		if (recibir_conexion()) {
 			// Entra si se conecto un cliente al servidor
-			i = 0;
+			idx_buffer = 0;
 			isMsjInicializado = false;
 			estado++;
 		}
@@ -235,32 +253,51 @@ void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 			c = client.read();
 			msj = (uint8_t) c;
 			if (c == ':') {
-				// Entra si recibio inicializados
-				i = 0;
+				// Entra si recibio inicializador
+				idx_buffer = 0;
 				isMsjInicializado = true;
 			}
 			if (isMsjInicializado) {
 				// Entra si ya ha recibido el inicializador
 				HAL_UART_Transmit(&huart1, &msj, 1, 100);
-				buffer[i++] = msj;
+				buffer[idx_buffer++] = msj;
 			}
-			if (c == ';') {
-				// Entra si recibio terminador
+			if (c == ';' && isMsjInicializado) {
+				// Entra si recibio terminador y el msj esta inicializado
 				isMsjInicializado = false;
-				buffer[i] = msj;
 				estado++;
 			}
 		}
 		break;
 	case 3:	// Interpreta msj recibido
-		if (buffer[1] == '1') {
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-		} else {
+		switch (buffer[1]) {
+		case 'C':
+			debeResponder();
+			break;
+		case '0':
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+			noDebeResponder();
+			break;
+		case '1':
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+			noDebeResponder();
+			break;
 		}
 		estado++;
 		break;
 	case 4:	// Contesta a cliente
+		if (debeResponder()) {
+			// Entra si debe responder al cliente
+			switch (buffer[1]) {
+			case 'C':
+				if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13)) {
+					client.print(":1;");
+				} else {
+					client.print(":0;");
+				}
+				break;
+			}
+		}
 		estado++;
 		break;
 	case 5: // Desconecta del cliente
