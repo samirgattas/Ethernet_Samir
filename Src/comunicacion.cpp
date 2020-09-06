@@ -29,14 +29,22 @@
 extern SPI_HandleTypeDef hspi1;
 extern UART_HandleTypeDef huart1;
 
-//uint8_t mac[6] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+// Estado de la maquina de estados de la comunicacion
+uint16_t estado = 0;
+
+// Mac del dispositivo
 uint8_t mac[6] = {MAC};
-//char server[] = "www.google.com";
+
+//IP del servidor al que se conectara el cliente
 IPAddress ip_server(IP_SERVIDOR);
 
 IPAddress ip(IP_PROPIA);
 IPAddress myDns(192, 168, 0, 1);
+
+// Objeto cliente
 EthernetClient client;
+
+// Objeto servidor
 EthernetServer server(PUERTO);
 
 int8_t byteCount = -1;
@@ -44,8 +52,8 @@ int8_t byteCount = -1;
 static uint8_t buffer[1024];
 
 // ############################################################################
-// FUNCIONES INTERNAS
-
+// CABECERA DE FUNCIONES INTERNAS
+bool recibir_conexion();
 
 // ############################################################################
 // FUNCIONES EXTERNAS
@@ -187,6 +195,61 @@ void escuchar_cliente() {
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\nFin\n", 4, 100);
 	HAL_Delay(15);
 	client.stop();
+}
+
+bool recibir_conexion() {
+	client = server.available();
+	if (!client)
+		return false;
+	return true;
+}
+/*
+char leer_mensaje() {
+	char caracter_leido;
+	caracter_leido = client.read();
+
+	return caracter_leido;
+}*/
+
+void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
+	int i;
+	char c;
+	uint8_t msj;
+	switch(estado) {
+	case 0:	// Obtiene direccion IP
+		inicializar_servidor(_spi, _uart);
+		estado++;
+		break;
+	case 1:	// Espera conexion de cliente
+		if (recibir_conexion()) {
+			// Entra si se conecto un cliente al servidor
+			estado++;
+			i = 0;
+		}
+		break;
+	case 2:	// Lee msj desde cliente
+		if (client.available()) {
+			c = client.read();
+			msj = (uint8_t) c;
+			HAL_UART_Transmit(&huart1, &msj, 1, 100);
+			buffer[i++] = (uint8_t)c;
+		} else {
+			client.stop();
+			estado++;
+		}
+		break;
+	case 3:	// Interpreta msj recibido
+		if (buffer[0] == '1') {
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+		} else {
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+		}
+		estado = 1;
+		break;
+	case 4:	// Contesta a cliente
+
+		break;
+	}
 }
 
 // ############################################################################

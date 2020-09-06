@@ -98,7 +98,6 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  inicializar_servidor(hspi1, huart1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -112,7 +111,7 @@ int main(void)
 	  çconnect_to_server();
 	  check_client();
 	  */
-	  escuchar_cliente();
+	  me_servidor(hspi1, huart1);
   }
   /* USER CODE END 3 */
 }

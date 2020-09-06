@@ -30,6 +30,7 @@ void check_client(void);
 
 void inicializar_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart);
 void escuchar_cliente(void);
+void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart);
 
 
 #endif /* INC_COMUNICACION_H_ */
