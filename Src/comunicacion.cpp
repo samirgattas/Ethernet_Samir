@@ -51,6 +51,8 @@ int8_t byteCount = -1;
 
 static uint8_t buffer[1024];
 
+bool isMsjInicializado;
+
 // ############################################################################
 // CABECERA DE FUNCIONES INTERNAS
 bool recibir_conexion();
@@ -223,31 +225,47 @@ void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 	case 1:	// Espera conexion de cliente
 		if (recibir_conexion()) {
 			// Entra si se conecto un cliente al servidor
-			estado++;
 			i = 0;
+			isMsjInicializado = false;
+			estado++;
 		}
 		break;
 	case 2:	// Lee msj desde cliente
 		if (client.available()) {
 			c = client.read();
 			msj = (uint8_t) c;
-			HAL_UART_Transmit(&huart1, &msj, 1, 100);
-			buffer[i++] = (uint8_t)c;
-		} else {
-			client.stop();
-			estado++;
+			if (c == ':') {
+				// Entra si recibio inicializados
+				i = 0;
+				isMsjInicializado = true;
+			}
+			if (isMsjInicializado) {
+				// Entra si ya ha recibido el inicializador
+				HAL_UART_Transmit(&huart1, &msj, 1, 100);
+				buffer[i++] = msj;
+			}
+			if (c == ';') {
+				// Entra si recibio terminador
+				isMsjInicializado = false;
+				buffer[i] = msj;
+				estado++;
+			}
 		}
 		break;
 	case 3:	// Interpreta msj recibido
-		if (buffer[0] == '1') {
+		if (buffer[1] == '1') {
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 		} else {
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 		}
-		estado = 1;
+		estado++;
 		break;
 	case 4:	// Contesta a cliente
-
+		estado++;
+		break;
+	case 5: // Desconecta del cliente
+		client.stop();
+		estado = 1;
 		break;
 	}
 }
