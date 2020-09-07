@@ -23,6 +23,11 @@
 #endif
 #define PUERTO			3030
 
+#define MAX_BUFFER	20
+
+#define INICIALIZADOR	':'
+#define FINALIZADOR	';'
+
 // ############################################################################
 // VARIABLES INTERNAS
 
@@ -31,6 +36,8 @@ extern UART_HandleTypeDef huart1;
 
 // Estado de la maquina de estados de la comunicacion
 uint16_t estado = 0;
+uint16_t sub_estado = 0;
+
 
 // Mac del dispositivo
 uint8_t mac[6] = {MAC};
@@ -47,7 +54,8 @@ EthernetClient client;
 // Objeto servidor
 EthernetServer server(PUERTO);
 
-static uint8_t buffer[1024];
+// Buffer de lectura para comunicacion
+static uint8_t buffer_read[20];
 
 // Indica que recibio el inicializador de msj
 bool isMsjInicializado;
@@ -60,18 +68,27 @@ int8_t byteCount = -1;
 // ############################################################################
 // CABECERA DE FUNCIONES INTERNAS
 bool recibir_conexion();
-bool debeResponder(void);
-bool noDebeResponder(void);
+bool debe_responder(void);
+bool no_debe_responder(void);
+void responder_consulta(void);
 // ############################################################################
 // CABECERA DE FUNCIONES INTERNAS
-bool debeResponder() {
+bool debe_responder() {
 	mustResponder = true;
 	return mustResponder;
 }
 
-bool noDebeResponder() {
+bool no_debe_responder() {
 	mustResponder = false;
 	return mustResponder;
+}
+
+void responder_consulta() {
+	char _buf[3];
+	_buf[0] = INICIALIZADOR;
+	_buf[1] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ? '1' : '0';
+	_buf[2] = FINALIZADOR;
+	client.print(_buf);
 }
 
 // ############################################################################
@@ -116,7 +133,7 @@ void connect_to_server() {
 		HAL_UART_Transmit(&huart1, (uint8_t *)"Fallo conexion\n", 15, 100);
 	}
 }
-
+/*
 void check_client() {
 	if (byteCount < 0)
 		return;
@@ -127,8 +144,8 @@ void check_client() {
 		if (len > 1024)
 			len = 1024;
 		//Serial.print("-> received "); Serial.println(len); //Serial.print(" bytes in "); Serial.println((float)(endMicros-beginMicros) / 1000000.0);
-		client.read(buffer, len);
-		HAL_UART_Transmit(&huart1, (uint8_t *)buffer, len, 100);
+		client.read(buffer_read, len);
+		HAL_UART_Transmit(&huart1, (uint8_t *)buffer_read, len, 100);
 		byteCount += len;
 	}
 	// if the server's disconnected, stop the client:
@@ -146,7 +163,7 @@ void check_client() {
 		byteCount = -1;
 	}
 }
-
+*/
 
 //---------- Servidor --------------
 
@@ -233,8 +250,7 @@ char leer_mensaje() {
 // Maquina de estados del servidor para comunicacion
 void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 	static int idx_buffer;
-	char c;
-	uint8_t msj;
+	int16_t length;
 	switch(estado) {
 	case 0:	// Obtiene direccion IP
 		inicializar_servidor(_spi, _uart);
@@ -246,55 +262,61 @@ void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 			idx_buffer = 0;
 			isMsjInicializado = false;
 			estado++;
+			sub_estado = 1;
 		}
 		break;
 	case 2:	// Lee msj desde cliente
-		if (client.available()) {
-			c = client.read();
-			msj = (uint8_t) c;
-			if (c == ':') {
-				// Entra si recibio inicializador
-				idx_buffer = 0;
-				isMsjInicializado = true;
+		switch (sub_estado) {
+		case 1:	// Lee la respuesta
+			length = client.available();
+			if (length > 20) {
+				length = 20;
 			}
-			if (isMsjInicializado) {
-				// Entra si ya ha recibido el inicializador
-				HAL_UART_Transmit(&huart1, &msj, 1, 100);
-				buffer[idx_buffer++] = msj;
+			client.read(buffer_read, length);
+			idx_buffer = 0;
+			sub_estado++;
+			break;
+		case 2:	// Busca los terminadores
+			if (buffer_read[0] == INICIALIZADOR) {
+				for (int i = 0; i < MAX_BUFFER; i++) {
+					if (buffer_read[i] == FINALIZADOR) {
+						idx_buffer = i;
+						break;
+					}
+				}
 			}
-			if (c == ';' && isMsjInicializado) {
-				// Entra si recibio terminador y el msj esta inicializado
-				isMsjInicializado = false;
+			sub_estado++;
+		case 3:	// Verifica que esten ambos
+			if (buffer_read[0]
+					== INICIALIZADOR && buffer_read[idx_buffer] == FINALIZADOR) {
 				estado++;
+			} else {
+				estado = 5;
 			}
 		}
 		break;
 	case 3:	// Interpreta msj recibido
-		switch (buffer[1]) {
+		switch (buffer_read[1]) {
 		case 'C':
-			debeResponder();
+			debe_responder();
 			break;
 		case '0':
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-			noDebeResponder();
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+			no_debe_responder();
 			break;
 		case '1':
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-			noDebeResponder();
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+			no_debe_responder();
 			break;
 		}
 		estado++;
 		break;
 	case 4:	// Contesta a cliente
-		if (debeResponder()) {
+		if (debe_responder()) {
 			// Entra si debe responder al cliente
-			switch (buffer[1]) {
+			switch (buffer_read[1]) {
 			case 'C':
-				if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13)) {
-					client.print(":1;");
-				} else {
-					client.print(":0;");
-				}
+				responder_consulta();
 				break;
 			}
 		}
