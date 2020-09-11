@@ -57,9 +57,6 @@ EthernetServer server(PUERTO);
 // Buffer de lectura para comunicacion
 static uint8_t buffer_read[20];
 
-// Indica que recibio el inicializador de msj
-bool isMsjInicializado;
-
 // Indica que debe responder/Indica que esta esperando respuesta
 bool mustResponder;
 
@@ -144,21 +141,24 @@ void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 		if (recibir_conexion()) {
 			// Entra si se conecto un cliente al servidor
 			idx_buffer = 0;
-			isMsjInicializado = false;
 			estado++;
 			sub_estado = 1;
 		}
 		break;
-	case 2:	// Lee msj desde cliente
+	case 2:	// Recibe msj desde cliente
 		switch (sub_estado) {
 		case 1:	// Lee la respuesta
 			length = client.available();
-			if (length > 20) {
-				length = 20;
+			if (length > 0) {
+				// Entra si recibio msj
+				length = length > MAX_BUFFER ? MAX_BUFFER : length;
+				client.read(buffer_read, length);
+				idx_buffer = 0;
+				sub_estado++;
+			} else if (!client.connected()) {
+				// Entra si el cliente se desconeto
+				estado = 5;
 			}
-			client.read(buffer_read, length);
-			idx_buffer = 0;
-			sub_estado++;
 			break;
 		case 2:	// Busca los terminadores
 			if (buffer_read[0] == INICIALIZADOR) {
@@ -175,7 +175,9 @@ void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 					== INICIALIZADOR && buffer_read[idx_buffer] == FINALIZADOR) {
 				estado++;
 			} else {
-				estado = 5;
+				estado = 2;
+				sub_estado = 1;
+				idx_buffer = 0;
 			}
 		}
 		break;
@@ -204,7 +206,14 @@ void me_servidor(SPI_HandleTypeDef &_spi, UART_HandleTypeDef &_uart) {
 				break;
 			}
 		}
-		estado++;
+		if (client.connected()) {
+			// Entra si el cliente esta conectado
+			estado = 2;
+			sub_estado = 1;
+			idx_buffer = 0;
+		} else {
+			estado = 5;
+		}
 		break;
 	case 5: // Desconecta del cliente
 		client.stop();
